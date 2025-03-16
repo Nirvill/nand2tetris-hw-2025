@@ -6,7 +6,6 @@ on:
   pull_request:
     branches: [ "main" ]
 
-  # Allows you to run this workflow manually from the Actions tab
   workflow_dispatch:
 
 jobs:
@@ -17,13 +16,16 @@ jobs:
       - name: Validate Pull Request title
         if: github.event_name == 'pull_request'
         run: |
-          pr_title_regex="^[a-zA-Z-]+_[a-zA-Z-]+_hw[0-9]+$"
+          pr_title_regex="^[a-zA-Z-]+_[a-zA-Z-]+_hw([0-9]+)$"
           pr_title="${{ github.event.pull_request.title }}"
-          if ! [[ $pr_title =~ $pr_title_regex ]]; then
+          if [[ $pr_title =~ $pr_title_regex ]]; then
+            HW_NUMBER=${BASH_REMATCH[1]}
+            echo "HW_NUMBER=$HW_NUMBER" >> $GITHUB_ENV
+          else
             echo "Pull Request title expected in format <Surname>_<Name>_hw<N>"
-            echo "${{ github.event.pull_request.title }} is given"
+            echo "Received: $pr_title"
             exit 1
-          fi        
+          fi
 
       - name: Check out repository code
         uses: actions/checkout@v4
@@ -32,39 +34,26 @@ jobs:
         id: changed-files
         uses: tj-actions/changed-files@v44
 
-      - name: List all changed files
+      - name: Filter only relevant homework files
         env:
           ALL_CHANGED_FILES: ${{ steps.changed-files.outputs.all_changed_files }}
+          HW_NUMBER: ${{ env.HW_NUMBER }}
         run: |
-          echo "Files changed:"
-          echo ${ALL_CHANGED_FILES}
-          ALL_CHANGED_FILES_ARR=(${ALL_CHANGED_FILES})
-          DIR_NAME="$(dirname ${ALL_CHANGED_FILES_ARR[0]})"
-          SAME_DIR=true
-          for file in "${ALL_CHANGED_FILES_ARR[@]}"; do 
-            if [ "$DIR_NAME" != "$(dirname $file)" ]; then
-            SAME_DIR=false
-            break
+          echo "Filtering changes for HW$HW_NUMBER"
+          ALLOWED_DIR="*/hw$HW_NUMBER/*"
+          FILTERED_FILES=()
+          for file in $ALL_CHANGED_FILES; do
+            if [[ $file == $ALLOWED_DIR ]]; then
+              FILTERED_FILES+=("$file")
             fi
           done
-          echo "All changed files are in the same directory: $SAME_DIR"
-          if [ "$SAME_DIR" = true ] ; then
-             echo "HW_DIR=$DIR_NAME" >> $GITHUB_ENV
-             exit 0
-          else
-             exit 1
-          fi     
-
-      - name: Validate folder name
-        run: |
-          dir_name_regex="^[a-zA-Z-]+_[a-zA-Z-]+/hw[0-9]+$"
-          if ! [[ ${{ env.HW_DIR }} =~ $dir_name_regex ]]; then
-            echo "Homework dir expected in format <Surname>_<Name>/hw<N>"
-            echo "${{ env.HW_DIR }} is given"
+          if [ ${#FILTERED_FILES[@]} -eq 0 ]; then
+            echo "No valid files found for HW$HW_NUMBER. Exiting."
             exit 1
           fi
+          echo "FILTERED_FILES=${FILTERED_FILES[@]}" >> $GITHUB_ENV
 
       - name: Call the action kochaika/nand2tetris-grader
         uses: kochaika/nand2tetris-grader@main
         with:
-          dir: /github/workspace/${{ env.HW_DIR }}
+          dir: /github/workspace/${{ env.FILTERED_FILES }}
